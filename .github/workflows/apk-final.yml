@@ -304,6 +304,71 @@ jobs:
           </adaptive-icon>
           EOF_11
 
+      - name: Logo de l'application
+        continue-on-error: true
+        run: |
+          curl -fsSL --retry 3 -o logo.png https://empireinter.netlify.app/icons/logo.png
+          python3 -c "import PIL" 2>/dev/null || pip install --break-system-packages -q pillow
+          cat > make_icon.py <<'EOF_PY'
+          import os
+          from PIL import Image, ImageDraw, ImageFilter
+
+          res = "app/src/main/res"
+          im = Image.open("logo.png").convert("RGBA")
+          w, h = im.size
+
+          # 1. Rendre transparent le fond blanc exterieur (zone connectee aux coins)
+          mask = Image.new("L", (w, h), 255)
+          work = im.convert("RGB")
+          for corner in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+              px = work.getpixel(corner)
+              if min(px) > 225:
+                  ImageDraw.floodfill(work, corner, (255, 0, 255), thresh=45)
+          pix = work.load()
+          mp = mask.load()
+          for y in range(h):
+              for x in range(w):
+                  if pix[x, y] == (255, 0, 255):
+                      mp[x, y] = 0
+          # adoucir le bord et manger le lisere blanc
+          mask = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.GaussianBlur(1))
+          im.putalpha(mask)
+
+          # 2. Recadrer sur le carre arrondi
+          bbox = im.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox()
+          im = im.crop(bbox)
+          side = max(im.size)
+          sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+          sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
+          im = sq
+
+          # 3. Couleur de fond = bleu moyen du logo pres du bord, a l'interieur
+          pts = [(side // 2, int(side * 0.04)), (side // 2, int(side * 0.96)), (int(side * 0.04), side // 2), (int(side * 0.96), side // 2)]
+          cols = [im.getpixel(p)[:3] for p in pts]
+          bg = tuple(sum(c[i] for c in cols) // len(cols) for i in range(3))
+          bg_hex = "#%02x%02x%02x" % bg
+
+          # 4. Premier plan adaptatif : logo a 62 % du canevas 108dp
+          sizes = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
+          for name, s in sizes.items():
+              d = os.path.join(res, "drawable-" + name)
+              os.makedirs(d, exist_ok=True)
+              inner = int(s * 0.62)
+              canvas = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+              logo = im.resize((inner, inner), Image.LANCZOS)
+              canvas.paste(logo, ((s - inner) // 2, (s - inner) // 2), logo)
+              canvas.save(os.path.join(d, "ic_launcher_foreground.png"))
+
+          # 5. Remplacer l'ancien dessin et la couleur de fond
+          old = os.path.join(res, "drawable", "ic_launcher_foreground.xml")
+          if os.path.exists(old):
+              os.remove(old)
+          with open(os.path.join(res, "values", "colors.xml"), "w") as f:
+              f.write('<resources>\n    <color name="ic_launcher_background">%s</color>\n</resources>\n' % bg_hex)
+          print("Icone creee, fond", bg_hex)
+          EOF_PY
+          python3 make_icon.py
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
