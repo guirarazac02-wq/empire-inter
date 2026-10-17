@@ -263,7 +263,7 @@ jobs:
           mkdir -p app/src/main/res/values
           cat > app/src/main/res/values/strings.xml <<'EOF_7'
           <resources>
-              <string name="app_name">Empire Inter</string>
+              <string name="app_name">EMPIRE INTER EXCHANGE</string>
           </resources>
           EOF_7
           mkdir -p app/src/main/res/values
